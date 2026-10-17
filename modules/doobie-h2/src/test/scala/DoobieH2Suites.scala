@@ -269,6 +269,10 @@ final class UnionsSuite extends DoobieH2DatabaseSuite with SqlUnionSuite {
   lazy val mapping = new DoobieH2TestMapping(transactor) with SqlUnionsMapping[IO]
 }
 
+final class UnionLimitSuite extends DoobieH2DatabaseSuite with SqlUnionLimitSuite {
+  lazy val mapping = new DoobieH2TestMapping(transactor) with SqlUnionLimitMapping[IO]
+}
+
 final class WorldSuite extends DoobieH2DatabaseSuite with SqlWorldSuite {
   lazy val mapping = new DoobieH2TestMapping(transactor) with SqlWorldMapping[IO]
 }

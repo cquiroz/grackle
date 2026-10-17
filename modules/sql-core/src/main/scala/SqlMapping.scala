@@ -1550,7 +1550,8 @@ trait SqlMappingLike[F[_]] extends CirceMappingLike[F] with SqlModule[F] { self 
         def distributeJoinConditions(
             join: SqlJoin,
             subquery: SubqueryRef): (SqlJoin, List[Predicate]) =
-          if (inner || join.isPredicate) (join, liftedPredicates(join))
+          if (inner) (join, liftedPredicates(join))
+          else if (join.isPredicate) (join, Nil)
           else
             // Every OUTER APPLY reachable here can be correlated; a None is a bug, not a query.
             correlate(join, subquery)
@@ -1560,9 +1561,13 @@ trait SqlMappingLike[F[_]] extends CirceMappingLike[F] with SqlModule[F] { self 
 
         /**
          * The join's conditions expressed as predicates of the enclosing select.
+         *
+         * A predicate subquery correlates itself to the parent, but through its own copy of any
+         * intermediate table, so when it hangs off one (a multi-hop nest) the join's conditions
+         * are what tie it to that table's row. They are lifted for a predicate subquery too.
          */
         private def liftedPredicates(join: SqlJoin): List[Predicate] =
-          if (!join.isPredicate) join.on.map { case (p, c) => Eql(p.toTerm, c.toTerm) } else Nil
+          join.on.map { case (p, c) => Eql(p.toTerm, c.toTerm) }
 
         /**
          * Yields a copy of `join` with its conditions moved inside its subquery.
@@ -2592,7 +2597,8 @@ trait SqlMappingLike[F[_]] extends CirceMappingLike[F] with SqlModule[F] { self 
                 multiTable: Boolean,
                 nested: SqlSelect,
                 joinCols: List[SqlColumn],
-                suffix: String): SqlSelect = {
+                suffix: String,
+                subqueryInner: Boolean): SqlSelect = {
               def isMergeable: Boolean =
                 mergePreservesRows(nested) &&
                   !multiTable &&
@@ -2611,22 +2617,23 @@ trait SqlMappingLike[F[_]] extends CirceMappingLike[F] with SqlModule[F] { self 
                 }
                 val base0 = nested
                   .copy(cols = (exposeCols ++ nested.cols).distinct)
-                  .toSubquery(syntheticName(suffix), Laterality(lateral, inner))
+                  .toSubquery(syntheticName(suffix), Laterality(lateral, subqueryInner))
                 base0.copy(cols = nested.cols.map(_.derive(base0.table)))
               }
             }
 
             def mkNested(
-                outer: Boolean,
                 withs: List[WithRef],
                 table: TableExpr,
                 cols: List[SqlColumn],
                 wheres: List[Predicate],
                 joins: List[SqlJoin]): SqlSelect = {
+              // Also inside `_multi`: the tables its joins' conditions refer to are all in
+              // scope there, and an APPLY subquery left undistributed loses its correlation.
               val distributed =
                 joins.map { join =>
                   join.child match {
-                    case sq: SubqueryRef if outer =>
+                    case sq: SubqueryRef =>
                       sq.laterality.distributeJoinConditions(join, sq)
                     case _ => (join, Nil)
                   }
@@ -2653,16 +2660,25 @@ trait SqlMappingLike[F[_]] extends CirceMappingLike[F] with SqlModule[F] { self 
             val initJoins = joins.init
             val multiJoinHead = initJoins.headOption
             val multiTable = multiJoinHead.nonEmpty
+
+            // A singular field reached through several joins fans out at the intermediate
+            // hops: with a LEFT join every intermediate row survives, null-padded, so the
+            // `_multi` subquery yields one row per intermediate row rather than one per
+            // parent, despite being marked oneToOne. Joining the hops INNER keeps one row per
+            // parent; the `_multi` join to the parent keeps the field's own innerness, so a
+            // missing child still yields a null.
+            val hopInner = inner || (multiTable && oneToOne)
             val multiTableSuffixJoins =
-              initJoins.drop(1).map(_.toSqlJoin(parentContext, parentContext, inner))
+              initJoins.drop(1).map(_.toSqlJoin(parentContext, parentContext, hopInner))
             val lastJoin = joins.last
             val lastJoinParentTable = lastJoin.parentTable(parentContext)
 
-            val base = mkSubquery(multiTable, this, lastJoin.childCols(table), "_nested")
+            val base =
+              mkSubquery(multiTable, this, lastJoin.childCols(table), "_nested", hopInner)
 
             val finalJoins =
               if (!isAssociative(context)) {
-                val finalJoin = lastJoin.toSqlJoin(lastJoinParentTable, base.table, inner)
+                val finalJoin = lastJoin.toSqlJoin(lastJoinParentTable, base.table, hopInner)
                 finalJoin :: Nil
               } else {
                 // On the mergeable branch base.table is the raw TableRef, so its name may be
@@ -2672,7 +2688,7 @@ trait SqlMappingLike[F[_]] extends CirceMappingLike[F] with SqlModule[F] { self 
                   Some(base.table.identifier + "_assoc"),
                   base.table,
                   true)
-                val assocJoin = lastJoin.toSqlJoin(lastJoinParentTable, assocTable, inner)
+                val assocJoin = lastJoin.toSqlJoin(lastJoinParentTable, assocTable, hopInner)
 
                 // This join is on the key between a table and itself, so it always matches and
                 // an outer join is as good as an inner one. `assocJoin` carries the join's real
@@ -2689,25 +2705,14 @@ trait SqlMappingLike[F[_]] extends CirceMappingLike[F] with SqlModule[F] { self 
               }
 
             val nestedJoins = multiTableSuffixJoins ++ finalJoins ++ base.joins
-            val nested = mkNested(
-              !multiTable,
-              base.withs,
-              nestedJoins.head.parent,
-              base.cols,
-              base.wheres,
-              nestedJoins)
+            val nested =
+              mkNested(base.withs, nestedJoins.head.parent, base.cols, base.wheres, nestedJoins)
 
             multiJoinHead.fold(nested) { firstJoin0 =>
               val nestedBase =
-                mkSubquery(false, nested, firstJoin0.childCols(nested.table), "_multi")
+                mkSubquery(false, nested, firstJoin0.childCols(nested.table), "_multi", inner)
               val initialJoin = firstJoin0.toSqlJoin(parentTable, nestedBase.table, inner)
-              mkNested(
-                true,
-                Nil,
-                parentTable,
-                nestedBase.cols,
-                Nil,
-                initialJoin :: nestedBase.joins)
+              mkNested(Nil, parentTable, nestedBase.cols, Nil, initialJoin :: nestedBase.joins)
             }
           }
 

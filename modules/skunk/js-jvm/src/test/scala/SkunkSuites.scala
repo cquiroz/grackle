@@ -260,6 +260,10 @@ final class UnionsSuite extends SkunkDatabaseSuite with SqlUnionSuite {
   lazy val mapping = new SkunkTestMapping(pool) with SqlUnionsMapping[IO]
 }
 
+final class UnionLimitSuite extends SkunkDatabaseSuite with SqlUnionLimitSuite {
+  lazy val mapping = new SkunkTestMapping(pool) with SqlUnionLimitMapping[IO]
+}
+
 final class WorldSuite extends SkunkDatabaseSuite with SqlWorldSuite {
   lazy val mapping = new SkunkTestMapping(pool) with SqlWorldMapping[IO]
 }

@@ -241,6 +241,10 @@ final class UnionsSuite extends DoobieMSSqlDatabaseSuite with SqlUnionSuite {
   lazy val mapping = new DoobieMSSqlTestMapping(transactor) with SqlUnionsMapping[IO]
 }
 
+final class UnionLimitSuite extends DoobieMSSqlDatabaseSuite with SqlUnionLimitSuite {
+  lazy val mapping = new DoobieMSSqlTestMapping(transactor) with SqlUnionLimitMapping[IO]
+}
+
 final class WorldSuite extends DoobieMSSqlDatabaseSuite with SqlWorldSuite {
   lazy val mapping = new DoobieMSSqlTestMapping(transactor) with SqlWorldMapping[IO]
 }

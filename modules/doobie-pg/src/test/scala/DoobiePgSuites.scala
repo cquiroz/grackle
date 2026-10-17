@@ -255,6 +255,10 @@ final class UnionsSuite extends DoobiePgDatabaseSuite with SqlUnionSuite {
   lazy val mapping = new DoobiePgTestMapping(transactor) with SqlUnionsMapping[IO]
 }
 
+final class UnionLimitSuite extends DoobiePgDatabaseSuite with SqlUnionLimitSuite {
+  lazy val mapping = new DoobiePgTestMapping(transactor) with SqlUnionLimitMapping[IO]
+}
+
 final class WorldSuite extends DoobiePgDatabaseSuite with SqlWorldSuite {
   lazy val mapping = new DoobiePgTestMapping(transactor) with SqlWorldMapping[IO]
 }

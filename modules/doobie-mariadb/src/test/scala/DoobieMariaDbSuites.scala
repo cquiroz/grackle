@@ -278,6 +278,10 @@ final class UnionsSuite extends DoobieMariaDbDatabaseSuite with SqlUnionSuite {
   lazy val mapping = new DoobieMariaDbTestMapping(transactor) with SqlUnionsMapping[IO]
 }
 
+final class UnionLimitSuite extends DoobieMariaDbDatabaseSuite with SqlUnionLimitSuite {
+  lazy val mapping = new DoobieMariaDbTestMapping(transactor) with SqlUnionLimitMapping[IO]
+}
+
 final class WorldSuite extends DoobieMariaDbDatabaseSuite with SqlWorldSuite {
   lazy val mapping = new DoobieMariaDbTestMapping(transactor) with SqlWorldMapping[IO]
 }
